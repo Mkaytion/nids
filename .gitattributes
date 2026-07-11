@@ -1,0 +1,4 @@
+# Source is built on Linux — keep LF line endings everywhere (a CRLF Makefile
+# breaks GNU make). Treat the sample capture as binary so it's never touched.
+* text=auto eol=lf
+*.pcap binary

@@ -1,0 +1,5 @@
+build/
+*.o
+*.pcap
+# keep the committed sample capture so the repo runs out of the box
+!samples/test.pcap
