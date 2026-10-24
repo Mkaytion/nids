@@ -45,20 +45,55 @@ One per line: `<sid> "<message>" <content>`. Content is matched byte-for-byte
 
 ## Benchmarks
 
-Synthetic labelled traffic with a fixed seed, run on Ubuntu (WSL2), single
-thread, `-O2`.
+All numbers come from the scripts in [`bench/`](bench/). Run on Ubuntu (WSL2),
+single thread, `-O2`; speeds vary by machine.
+
+```sh
+make bench         # synthetic suite      -> bench/RESULTS.md
+make bench-real    # real traffic, ~1.8 GB download -> bench/CIC-IDS2018.md
+```
+
+### Implementation checks
+
+Synthetic packets with known answers ([full results](bench/RESULTS.md)).
 
 | Test | Result |
 |---|---|
-| Detection: attack in one plain TCP packet | **100%** (320/320) |
-| Detection: attack via VLAN, IPv6, UDP, split fragments or split segments | 0% (0/800) |
-| False positives: normal web traffic | **0.00%** (0/10,000) |
-| False positives: web pages quoting attack strings | 71.4% (500/700) |
 | Alerts match a reference implementation | **100%** (18,140 packets) |
 | Payload extraction: well-formed packets | **100%** (2,000/2,000) |
 | Malformed packets rejected | **100%** (1,200/1,200) |
 | ASan / UBSan / LSan reports over 220,000 fuzzed packets | **0** |
-| Throughput with 8 / 1,000 / 5,000 rules | 2.26M / 1.26M / 0.58M packets/s |
+| Throughput with 8 / 1,000 / 5,000 rules | 2.49M / 1.51M / 0.75M packets/s |
+
+### Real traffic: CSE-CIC-IDS2018
+
+19 captures from Thursday 22 Feb 2018 of the public
+[CSE-CIC-IDS2018](https://www.unb.ca/cic/datasets/ids-2018.html) dataset
+(3.0M packets, 1.8 GB), labelled from the dataset's published attacker and
+victim addresses ([full results](bench/CIC-IDS2018.md)). The default rules were
+committed before the dataset was examined and were not changed for it.
+
+| Traffic (TCP connections with payload) | Alerted |
+|---|---|
+| Attacks: XSS, SQL injection, login brute force | 0% (0/202) |
+| Benign | 0.000% (0/74,117) |
+
+Nothing was detected because the real attacks don't contain the default rules'
+literal strings: the payloads are URL-encoded (`%3Cscript%3E`) and use other
+forms (`console.log(...)`, `' and 1=1`). 66% of TCP payload bytes were also
+encrypted.
+
+### Detection on synthetic traffic
+
+These rows test the matcher, not real-world detection: the attacks were written
+to contain the rule strings, and the benign traffic was generated.
+
+| Test | Result |
+|---|---|
+| Attack in one plain TCP packet | 100% (320/320) |
+| Attack via VLAN, IPv6, UDP, split fragments or split segments | 0% (0/800) |
+| False positives: generated web traffic | 0.00% (0/10,000) |
+| False positives: generated pages quoting attack strings | 71.4% (500/700) |
 
 ## Limits
 
@@ -67,5 +102,6 @@ thread, `-O2`.
 - No stream reassembly, so a signature split across packets is missed.
 - Content rules can't see inside HTTPS, and they fire on pages that merely
   quote an attack string.
-- Literal, case-sensitive matching: encodings like `%2e%2e/` get past it.
+- Literal, case-sensitive matching with no HTTP decoding: URL-encoded payloads
+  get past it, which is why it missed every real attack above.
 - No port-scan or flood detection.
