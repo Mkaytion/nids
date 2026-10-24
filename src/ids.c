@@ -174,11 +174,10 @@ int main(int argc, char **argv)
     }
 
     /* 0 = loop until the file is exhausted. */
+    int rc = EXIT_SUCCESS;
     if (pcap_loop(handle, 0, handle_packet, (u_char *)&ctx) == PCAP_ERROR) {
         fprintf(stderr, "error during capture: %s\n", pcap_geterr(handle));
-        pcap_close(handle);
-        sig_free(ctx.sigs);
-        return EXIT_FAILURE;
+        rc = EXIT_FAILURE;      /* still report what was read, e.g. a truncated last record */
     }
 
     pcap_close(handle);
@@ -186,5 +185,5 @@ int main(int argc, char **argv)
 
     printf("\n---\n%lu packets, %lu IPv4, %lu TCP, %lu alerts\n",
            ctx.stats.total, ctx.stats.ipv4, ctx.stats.tcp, ctx.stats.alerts);
-    return EXIT_SUCCESS;
+    return rc;
 }
