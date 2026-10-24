@@ -50,12 +50,17 @@ static void handle_packet(u_char *user,
     if (header->caplen < ETHER_HDR_LEN + sizeof(struct ipv4_hdr))
         return;
 
+    if (IPV4_VERSION(ip) != 4 || IPV4_HDR_LEN(ip) < sizeof(struct ipv4_hdr))
+        return;
+
     stats->ipv4++;
 
     uint32_t ip_hdr_len = IPV4_HDR_LEN(ip);       
 
     if (ip->protocol != IPPROTO_TCP)
         return;                                  
+    if (ntohs(ip->flags_frag) & 0x1FFF)
+        return;                                   /* non-first fragment */
     stats->tcp++;
 
 
@@ -73,6 +78,8 @@ static void handle_packet(u_char *user,
         (const struct tcp_hdr *)((const uint8_t *)ip + ip_hdr_len);
 
     uint32_t tcp_hdr_len = TCP_HDR_LEN(tcp);
+    if (tcp_hdr_len < sizeof(struct tcp_hdr))
+        return;
     if (header->caplen < ETHER_HDR_LEN + ip_hdr_len + tcp_hdr_len)
         return;
 
