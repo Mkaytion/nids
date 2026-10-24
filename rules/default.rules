@@ -1,0 +1,16 @@
+# nids signature rules, one per line:
+#
+#   <sid>  "<message>"  <content>
+#
+# content is matched byte-for-byte (case-sensitive) anywhere in a TCP payload.
+# Binary bytes go in |hex| blocks, Snort-style: |0d 0a| = CRLF.
+# Trailing whitespace is stripped; write a trailing space as |20|.
+
+1001  "Test signature (samples/test.pcap)"   EVIL_PAYLOAD_SIGNATURE_v1
+1002  "Directory traversal"                  /../../
+1003  "SQL injection tautology"              ' OR '1'='1
+1004  "XSS cookie theft"                     <script>alert(document.cookie)
+1005  "Shellshock function definition"       () { :; };
+1006  "Log4Shell JNDI lookup"                ${jndi:
+1007  "Windows command shell"                cmd.exe /c
+1008  "x86 NOP sled"                         |90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90|

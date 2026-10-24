@@ -3,8 +3,10 @@
 #include <pcap.h>
 #include <arpa/inet.h>   /* ntohs, ntohl, inet_ntop */
 #include <ctype.h>       /* isprint */
+#include <unistd.h>      /* getopt */
 
 #include "net_structs.h"
+#include "sigmatch.h"
 
 
 /*
@@ -16,20 +18,45 @@
  * to locate the application payload so later phases can scan it for malware
  * signatures.
  *
- * Usage:  ./ids <capture.pcap>
+ * Phase 2: signature matching. Each payload is scanned against a rules file
+ * (see sigmatch.c) and every hit is printed as an ALERT line.
+ *
+ * Usage:  ./ids [-v] <capture.pcap> [rules]     (-v also prints every TCP packet)
  */
 
 struct capture_stats {
     unsigned long total;   /* every packet pcap handed us          */
     unsigned long ipv4;    /* packets that were IPv4               */
     unsigned long tcp;     /* IPv4 packets whose L4 protocol is TCP */
+    unsigned long alerts;
 };
+
+struct ids_ctx {
+    struct capture_stats   stats;
+    struct sig_matcher    *sigs;
+    int                    verbose;
+    const struct ipv4_hdr *ip;     /* packet being scanned, for alert lines */
+    const struct tcp_hdr  *tcp;
+};
+
+static void on_alert(const struct sig_rule *rule, size_t offset, void *user)
+{
+    struct ids_ctx *ctx = (struct ids_ctx *)user;
+    char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &ctx->ip->src_addr, src, sizeof src);
+    inet_ntop(AF_INET, &ctx->ip->dst_addr, dst, sizeof dst);
+    printf("ALERT pkt=%lu sid=%u msg=\"%s\" %s:%u -> %s:%u offset=%zu\n",
+           ctx->stats.total, rule->sid, rule->msg,
+           src, ntohs(ctx->tcp->src_port), dst, ntohs(ctx->tcp->dst_port), offset);
+    ctx->stats.alerts++;
+}
 
 static void handle_packet(u_char *user,
                           const struct pcap_pkthdr *header,
                           const u_char *packet)
 {
-    struct capture_stats *stats = (struct capture_stats *)user;
+    struct ids_ctx *ctx = (struct ids_ctx *)user;
+    struct capture_stats *stats = &ctx->stats;
     stats->total++;
 
     /* --- Layer 2: Ethernet ------------------------------------------------ */
@@ -65,11 +92,13 @@ static void handle_packet(u_char *user,
 
 
 
-    char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &ip->src_addr, src, sizeof src);
-    inet_ntop(AF_INET, &ip->dst_addr, dst, sizeof dst);
-    printf("[%lu] TCP  %s -> %s  (ip_hdr_len=%u, caplen=%u)\n",
-           stats->total, src, dst, ip_hdr_len, header->caplen);
+    if (ctx->verbose) {
+        char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &ip->src_addr, src, sizeof src);
+        inet_ntop(AF_INET, &ip->dst_addr, dst, sizeof dst);
+        printf("[%lu] TCP  %s -> %s  (ip_hdr_len=%u, caplen=%u)\n",
+               stats->total, src, dst, ip_hdr_len, header->caplen);
+    }
 
 
     if (header->caplen < ETHER_HDR_LEN + ip_hdr_len + sizeof(struct tcp_hdr))
@@ -93,23 +122,44 @@ static void handle_packet(u_char *user,
     if ((uint32_t)payload_len > available)
         payload_len = (int)available;
 
-    printf("      payload: %d bytes  \"", payload_len);
-    for (int i = 0; i < payload_len && i < 40; i++)
-        putchar(isprint(payload[i]) ? payload[i] : '.');
-    printf("\"\n");
+    if (ctx->verbose) {
+        printf("      payload: %d bytes  \"", payload_len);
+        for (int i = 0; i < payload_len && i < 40; i++)
+            putchar(isprint(payload[i]) ? payload[i] : '.');
+        printf("\"\n");
+    }
+
+    ctx->ip = ip;
+    ctx->tcp = tcp;
+    sig_scan(ctx->sigs, payload, (size_t)payload_len, on_alert, ctx);
 }
 
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <capture.pcap>\n", argv[0]);
+    struct ids_ctx ctx = {0};
+    int opt, bad = 0;
+    while ((opt = getopt(argc, argv, "v")) != -1) {
+        if (opt == 'v')
+            ctx.verbose = 1;
+        else
+            bad = 1;
+    }
+    if (bad || argc - optind < 1 || argc - optind > 2) {
+        fprintf(stderr, "usage: %s [-v] <capture.pcap> [rules]\n", argv[0]);
         return EXIT_FAILURE;
     }
+    const char *pcap_path  = argv[optind];
+    const char *rules_path = argc - optind == 2 ? argv[optind + 1] : "rules/default.rules";
+
+    ctx.sigs = sig_load(rules_path);
+    if (ctx.sigs == NULL)
+        return EXIT_FAILURE;
 
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *handle = pcap_open_offline(argv[1], errbuf);
+    pcap_t *handle = pcap_open_offline(pcap_path, errbuf);
     if (handle == NULL) {
-        fprintf(stderr, "error: could not open '%s': %s\n", argv[1], errbuf);
+        fprintf(stderr, "error: could not open '%s': %s\n", pcap_path, errbuf);
+        sig_free(ctx.sigs);
         return EXIT_FAILURE;
     }
 
@@ -119,21 +169,22 @@ int main(int argc, char **argv)
         fprintf(stderr, "error: unsupported link type %d (expected Ethernet)\n",
                 pcap_datalink(handle));
         pcap_close(handle);
+        sig_free(ctx.sigs);
         return EXIT_FAILURE;
     }
 
-    struct capture_stats stats = {0, 0, 0};
-
     /* 0 = loop until the file is exhausted. */
-    if (pcap_loop(handle, 0, handle_packet, (u_char *)&stats) == PCAP_ERROR) {
+    if (pcap_loop(handle, 0, handle_packet, (u_char *)&ctx) == PCAP_ERROR) {
         fprintf(stderr, "error during capture: %s\n", pcap_geterr(handle));
         pcap_close(handle);
+        sig_free(ctx.sigs);
         return EXIT_FAILURE;
     }
 
     pcap_close(handle);
+    sig_free(ctx.sigs);
 
-    printf("\n---\n%lu packets, %lu IPv4, %lu TCP\n",
-           stats.total, stats.ipv4, stats.tcp);
+    printf("\n---\n%lu packets, %lu IPv4, %lu TCP, %lu alerts\n",
+           ctx.stats.total, ctx.stats.ipv4, ctx.stats.tcp, ctx.stats.alerts);
     return EXIT_SUCCESS;
 }

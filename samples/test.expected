@@ -1,0 +1,11 @@
+ALERT pkt=3 sid=5 msg="one byte, many hits per payload" 10.0.0.5:49152 -> 93.184.216.34:80 offset=8
+ALERT pkt=3 sid=3 msg="inside sid 1 (suffix link)" 10.0.0.5:49152 -> 93.184.216.34:80 offset=17
+ALERT pkt=3 sid=2 msg="same content as sid 1" 10.0.0.5:49152 -> 93.184.216.34:80 offset=16
+ALERT pkt=3 sid=1 msg="HTTP version" 10.0.0.5:49152 -> 93.184.216.34:80 offset=16
+ALERT pkt=3 sid=4 msg="end of HTTP headers (hex)" 10.0.0.5:49152 -> 93.184.216.34:80 offset=43
+ALERT pkt=4 sid=3 msg="inside sid 1 (suffix link)" 93.184.216.34:80 -> 10.0.0.5:49152 offset=1
+ALERT pkt=4 sid=2 msg="same content as sid 1" 93.184.216.34:80 -> 10.0.0.5:49152 offset=0
+ALERT pkt=4 sid=1 msg="HTTP version" 93.184.216.34:80 -> 10.0.0.5:49152 offset=0
+ALERT pkt=4 sid=5 msg="one byte, many hits per payload" 93.184.216.34:80 -> 10.0.0.5:49152 offset=21
+ALERT pkt=4 sid=4 msg="end of HTTP headers (hex)" 93.184.216.34:80 -> 10.0.0.5:49152 offset=35
+ALERT pkt=6 sid=6 msg="test signature" 10.0.0.5:49152 -> 93.184.216.34:80 offset=0

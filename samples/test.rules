@@ -1,0 +1,9 @@
+# Rules for `make test`, chosen to hit the tricky Aho-Corasick cases.
+
+1  "HTTP version"                       HTTP/1.1
+2  "same content as sid 1"              HTTP/1.1
+3  "inside sid 1 (suffix link)"         TTP/1
+4  "end of HTTP headers (hex)"          |0d 0a 0d 0a|
+5  "one byte, many hits per payload"    e
+6  "test signature"                     EVIL_PAYLOAD_SIGNATURE_v1
+7  "never matches"                      nomatch
